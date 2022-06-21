@@ -1,0 +1,343 @@
+---
+title: "KRAS vs EV ECD cutting site secondary strucure and solvent accessibiltiy analysis by AlphaFold"
+output: html_notebook
+---
+
+load required packages
+```{r}
+library(stringr)
+library(seqRFLP)
+library(DECIPHER)
+library(ggplot2)
+library(reshape2)
+library(RColorBrewer)
+library(dplyr)
+library(pracma)
+library(seqinr)
+library(ggseqlogo)
+library(geofacet)
+library(ggplot2)
+library(plyr)
+library(bio3d)
+library(UniProt.ws)
+```
+
+
+```{r}
+
+cut <- read.csv("KRAS_EV_cut_analysis.csv", stringsAsFactors = F)
+cut=cut[,-1]
+aa321.modified <- function (aa) ### function aa321 has a warning message, which is bothering. 
+{
+    aa1 <- c("-", ".", "X", bio3d::aa.table$aa1)
+    aa3 <- c("---", "---", "UNK", bio3d::aa.table$aa3)
+    convert <- function(x) {
+        if (is.na(x)) 
+            return(NA)
+        if (all(x != aa3)) {
+            return("X")
+        }
+        else {
+            return(aa1[which(x == aa3)])
+        }
+    }
+    return(as.vector(unlist(sapply(aa, convert))))
+}
+
+
+
+# cut <- read.csv("cut_seq_PDB_only.csv")
+# cut <- cut[, 2:13]
+
+cut$AlphaFold_str <- NA
+cut$Acc_alphaFold <- NA
+cut$Acc_alphaFold_sum <- NA
+
+for (i in 1:nrow(cut)){
+  tryCatch({
+    ## I have to say, pdb$atom residue can be used for index to extract dssp$acc and sse
+    pdb <- read.pdb(as.character(paste0("https://alphafold.ebi.ac.uk/files/AF-",cut$Accession[i],"-F1-model_v1.pdb"))) %>% suppressWarnings()#read pdb
+    dssp <- dssp(pdb, exefile = "/opt/anaconda3/bin/mkdssp", resno=T, full=FALSE, verbose=FALSE) ## using dssp, note, DSSP show every AA + small molecue
+    atom <- pdb$atom # find the residue ID, chain, and residue number
+    atom <- atom[, c("chain", "resno","resid")] # each residue has has differnt atoms
+    atom <- atom[!duplicated(atom[, c("chain", "resno")]), ] #get all the residue
+    atom[,4] <- apply(atom[, c("resno", "chain")], 1, paste, collapse= "_",sep='')
+    atom[,5] <- apply(atom[,"resid", drop =F], 1,aa321.modified)
+    atom <- atom[!grepl(atom$V5, pattern="X"),]
+    atom <- atom[with(atom, order(chain, resno)), ]
+    aa.seq <-  paste(atom$V5, collapse ='') ## get a new sequence including X as a non amino acid residue
+    pos <- motif.find(cut$P4_P4prime[i], aa.seq)[1]
+    res.name <- atom$V4[pos]
+    res.name <- sub(res.name, pattern = '[[:space:]]', replacement = '')
+    res.name <- sub(res.name, pattern = '[[:space:]]', replacement = '')
+    res.name <- sub(res.name, pattern = '[[:space:]]', replacement = '')## if there are more than one space
+    pos <- which(names(dssp$sse)==paste(res.name, "_NA", sep = ''))
+    
+    str <- ""
+    acc <- ""
+    acc_sum <- 0
+    for (j in 0:7 ){
+      if(dssp$sse[[pos+j]]==" "){
+        str <- paste0(str, "C")
+      }else {str <- paste0(str, dssp$sse[[pos+j]]) }
+      
+      acc <- paste(acc, dssp$acc[pos+j], collapse = " ")
+      acc_sum <- acc_sum+dssp$acc[pos+j]
+    }
+    acc <- substr(acc, 2, nchar(acc))
+    cut$AlphaFold_str[i] <- str
+    cut$Acc_alphaFold[i] <- acc
+    cut$Acc_alphaFold_sum[i] <- acc_sum
+#     
+#     cut[i, 10] <- pos ## start position on pdb sequence extraction, with no grey residue, but same with dssp's acc
+#     cut[i, 11]<- paste(dssp$acc[pos+5], dssp$acc[pos+6], dssp$acc[pos+7], dssp$acc[pos+8], dssp$acc[pos+9], collapse  = ' ') ## sovent acce
+#     cut[i, 12] <- sum(dssp$acc[pos+5], dssp$acc[pos+6], dssp$acc[pos+7], dssp$acc[pos+8], dssp$acc[pos+9]) ## sum of solvent accesibility
+#     str <- ''
+#     ## secondary structure
+# #str <- paste(dssp$sse[[pos]],dssp$sse[[pos+1]], dssp$sse[[pos+2]], dssp$sse[[pos+3]], dssp$sse[[pos+4]], dssp$sse[[pos+5]], collapse ='') 
+#     cut[i,13] <- str
+#     rm(pdb, aa.seq,str, a, dssp, atom, res.name)
+
+ }, error=function(e){
+   })
+}
+
+```
+
+average 2nd structure and acc
+```{r}
+
+
+
+cut$AlphaFold_str_all <- NA
+cut$Acc_alphaFold_ave <- NA
+cut$Acc_alphaFold_all <- NA
+
+for (i in 1:nrow(cut)){
+  tryCatch({
+    ## I have to say, pdb$atom residue can be used for index to extract dssp$acc and sse
+    pdb <- read.pdb(as.character(paste0("https://alphafold.ebi.ac.uk/files/AF-",cut$Accession[i],"-F1-model_v1.pdb"))) %>% suppressWarnings()#read pdb
+    dssp <- dssp(pdb, exefile = "/opt/anaconda3/bin/mkdssp", resno=T, full=FALSE, verbose=FALSE) ## using dssp, note, DSSP show every AA + small molecue
+    
+    str <- ""
+    acc <- ""
+    acc_sum <- 0
+    for (j in 1:length(dssp$sse) ){
+      if(dssp$sse[[j]]==" "){
+        str <- paste0(str, "C")
+      }else {str <- paste0(str, dssp$sse[[j]]) }
+      
+      acc <- paste(acc, dssp$acc[j], collapse = " ")
+      acc_sum <- acc_sum+dssp$acc[j]
+    }
+    acc <- substr(acc, 2, nchar(acc))
+    cut$AlphaFold_str_all[i] <- str
+    cut$Acc_alphaFold_all[i] <- acc
+    cut$Acc_alphaFold_ave[i] <- acc_sum/length(dssp$acc)
+#     
+#     cut[i, 10] <- pos ## start position on pdb sequence extraction, with no grey residue, but same with dssp's acc
+#     cut[i, 11]<- paste(dssp$acc[pos+5], dssp$acc[pos+6], dssp$acc[pos+7], dssp$acc[pos+8], dssp$acc[pos+9], collapse  = ' ') ## sovent acce
+#     cut[i, 12] <- sum(dssp$acc[pos+5], dssp$acc[pos+6], dssp$acc[pos+7], dssp$acc[pos+8], dssp$acc[pos+9]) ## sum of solvent accesibility
+#     str <- ''
+#     ## secondary structure
+# #str <- paste(dssp$sse[[pos]],dssp$sse[[pos+1]], dssp$sse[[pos+2]], dssp$sse[[pos+3]], dssp$sse[[pos+4]], dssp$sse[[pos+5]], collapse ='') 
+#     cut[i,13] <- str
+#     rm(pdb, aa.seq,str, a, dssp, atom, res.name)
+
+ }, error=function(e){
+   })
+}
+
+
+analysis <- ""
+for(i in 1:nrow(cut)){
+  analysis <- paste0(analysis, cut$AlphaFold_str_all[i])
+}
+
+analysis1 <- strsplit(analysis, split="") %>% unlist() %>% table() 
+analysis1 <- as.data.frame(analysis1)
+analysis1 <- analysis1[c(-1, -8), ]
+analysis1$per <- analysis1$Freq/sum(analysis1$Freq)*100
+write.csv(analysis1, "percentage_average_alphaFold.csv")
+
+```
+
+
+
+plot 1 & 2
+```{r}
+sec_str1<-c("H","G","I","B", "E", "S","C", "T")
+calculation1<- matrix(nrow=8, ncol=8) %>%as.data.frame
+colnames(calculation1)<-sec_str1
+# summarized how many each AA in each position
+for (i in 1:8) {
+  temp<-substr(cut[!is.na(cut$AlphaFold_str),]$AlphaFold_str, i, i)
+  uniqueaa<- sec_str1 %>%  unique() %>%data.frame(stringsAsFactors = F)
+  colnames(uniqueaa) <- "uniqueaa"
+  result<-apply(uniqueaa,1,function(x) str_count(temp, x["uniqueaa"]))
+  colnames(result) <- uniqueaa$uniqueaa
+  result<-result[, sec_str1]
+  #result[is.na(result)] <- 0
+  for (j in 1:8) {
+    calculation1[i,j]<-sum(result[,j])
+  }
+}
+
+calculation1$total<-sum(calculation1[, 1:8])/8
+calculation1_percentage<- calculation1/calculation1$total[1]*100
+
+perc1 <- calculation1_percentage[, 1:8] %>%t()%>% as.data.frame()
+
+write.csv(perc1, "percentage_alphafold_1.csv") 
+
+
+colnames(perc1) <- sub(colnames(perc1), pattern = "V", replacement = "P")
+perc1$str <- rownames(perc1)
+perc1.m <- melt(perc1)
+colnames(perc1.m)[1] <- "AA"
+perc1.m$AA <- factor(perc1.m$AA, levels = c("H","G","I","B", "E", "S","C", "T"))
+
+
+ggplot(perc1.m,aes(x=variable, y=value, fill=AA))+
+  geom_bar(stat="identity", color="black",position=position_stack(), width = .4) +
+  scale_fill_brewer(direction = -1, palette="Blues")+
+  theme_minimal()+
+  theme(axis.text.x = element_text( hjust = 1))+
+  labs(title="2nd_structure_AlphaFold1 \n", x="\n Position", y = "Percentage (%) \n")+
+  theme(legend.title  = element_text(size=12, face="bold", hjust = 0.5),
+        legend.text = element_text(size=12, face="bold"),     
+        plot.title= element_text(hjust = 0.5, face ="bold", size = 14),
+        axis.text=element_text(size=15, face="bold", hjust = 0.5),   
+        axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title=element_text(size=20,face="bold"))+
+  scale_y_continuous(breaks=seq(0,100,10))+
+  guides(fill=guide_legend(title="2nd Structure"))+
+  scale_x_discrete(labels=c("P5" = "P1'", "P6" = "P2'","P7" = "P3'", "P8"="P4'"))+
+  coord_fixed(ratio=.05)#+
+
+
+ggsave("2nd_str_PDB.tiff", plot = last_plot(), device = "tiff", path = NULL,
+       scale = 1, width = NA, height = NA, units = c("in", "cm", "mm"),
+       dpi = 600, limitsize = TRUE)
+
+
+cut$AlphaFold_str_HEC <- str_replace_all(cut$AlphaFold_str, pattern = "S", replacement = "C" )
+cut$AlphaFold_str_HEC <- str_replace_all(cut$AlphaFold_str_HEC, pattern = "G", replacement = "H" )
+cut$AlphaFold_str_HEC <- str_replace_all(cut$AlphaFold_str_HEC, pattern = "I", replacement = "H" )
+cut$AlphaFold_str_HEC <- str_replace_all(cut$AlphaFold_str_HEC, pattern = "B", replacement = "E" )
+cut$AlphaFold_str_HEC <- str_replace_all(cut$AlphaFold_str_HEC, pattern = "T", replacement = "C" )
+
+
+sec_str1<-c("H", "E", "C")
+calculation1<- matrix(nrow=8, ncol=3) %>%as.data.frame
+colnames(calculation1)<-sec_str1
+# summarized how many each AA in each position
+for (i in 1:8) {
+  temp<-substr(cut[!is.na(cut$AlphaFold_str_HEC),]$AlphaFold_str_HEC,i, i)
+  uniqueaa<- sec_str1 %>%  unique() %>%data.frame(stringsAsFactors = F)
+  colnames(uniqueaa) <- "uniqueaa"
+  result<-apply(uniqueaa,1,function(x) str_count(temp, x["uniqueaa"]))
+  colnames(result) <- uniqueaa$uniqueaa
+  result<-result[, sec_str1]
+  #result[is.na(result)] <- 0
+  for (j in 1:3) {
+    calculation1[i,j]<-sum(result[,j])
+  }
+}
+
+calculation1$total<-sum(calculation1[1, 1:3])
+calculation1_percentage<- calculation1/calculation1$total[1]*100
+
+perc1 <- calculation1_percentage[, 1:3] %>%t()%>% as.data.frame()
+
+write.csv(perc1, "percentage_AlphaFold2.csv")  
+
+colnames(perc1) <- sub(colnames(perc1), pattern = "V", replacement = "P")
+perc1$str <- rownames(perc1)
+perc1.m <- melt(perc1)
+colnames(perc1.m)[1] <- "AA"
+perc1.m$AA <- factor(perc1.m$AA, levels = c( "H",  "E", "C"))
+
+
+ggplot(perc1.m,aes(x=variable, y=value, fill=AA))+
+  geom_bar(stat="identity", color="black",position=position_stack(), width = .4) +
+  scale_fill_brewer(direction = -1, palette="Blues")+
+  theme_minimal()+
+  theme(axis.text.x = element_text( hjust = 1))+
+  labs(title="2nd_structure_AlphaFold2 \n", x="\n Position", y = "Percentage (%) \n")+
+  theme(legend.title  = element_text(size=12, face="bold", hjust = 0.5),
+        legend.text = element_text(size=12, face="bold"),     
+        plot.title= element_text(hjust = 0.5, face ="bold", size = 14),
+        axis.text=element_text(size=15, face="bold", hjust = 0.5),   
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title=element_text(size=20,face="bold"))+
+  scale_y_continuous(breaks=seq(0,100,10))+
+  guides(fill=guide_legend(title="2nd Structure"))+
+  scale_x_discrete(labels=c("P5" = "P1'", "P6" = "P2'","P7" = "P3'", "P8"="P4'"))+#+
+#coord_fixed(ratio=1)#+
+
+
+ggsave("2nd_str_PDB2.tiff", plot = last_plot(), device = "tiff", path = NULL,
+       scale = 1, width = NA, height = NA, units = c("in", "cm", "mm"),
+       dpi = 600, limitsize = TRUE)
+
+
+```
+
+
+plot 1 & 2
+```{r}
+cut1 <- cut[!is.na(cut$Acc_alphaFold), ]
+cut2 <- separate(
+  cut1,
+  Acc_alphaFold,
+  c("V1", "V2", "V3","V4","V5", "V6", "V7","V8"),
+  sep = " ",
+  remove = TRUE,
+  convert = FALSE,
+  extra = "warn",
+  fill = "warn"
+)
+
+cut2 <- cut2[, c("P4_P4prime","V1" , "V2" , "V3", "V4"  , "V5" , "V6" ,  "V7","V8"  )]
+cut2$P4.=substr(cut2$P4_P4prime, 8,8)
+
+
+
+ref <- read.csv("acc_ref.csv", stringsAsFactors = F)
+ref=ref[, 1:2]
+cut2$p4_ref <- NA
+cut2$p3_ref <- NA
+cut2$p2_ref <- NA
+cut2$p1_ref <- NA
+cut2$p1._ref <- NA
+cut2$p2._ref <- NA
+cut2$p3._ref <- NA
+cut2$p4._ref <- NA
+
+cut2$p4_RSA <- NA
+cut2$p3_RSA <- NA
+cut2$p2_RSA <- NA
+cut2$p1_RSA <- NA
+cut2$p1._RSA <- NA
+cut2$p2._RSA <- NA
+cut2$p3._RSA <- NA
+cut2$p4._RSA <- NA
+
+
+for (i in 1:8){
+  for (j in 1:nrow(cut2)){
+    pos <- which(ref$Residue== cut2[j, 9+i])
+    cut2[j, 17+i] <- ref$ACC.all[pos]
+    cut2[j, 25+i] <- as.numeric(cut2[j, 1+i])/cut2[j, 17+i]*100
+  }
+}
+
+write.csv(cut2, "acc_AlphaFold.csv")
+
+
+
+
+
+
+```
